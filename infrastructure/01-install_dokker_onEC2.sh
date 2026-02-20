@@ -1,5 +1,4 @@
-cd /home/ssm-user
-pwd
+cd /home/ssm-user && pwd
 #instalaar doker 
 sudo yum update -y
 sudo amazon-linux-extras install -y docker
