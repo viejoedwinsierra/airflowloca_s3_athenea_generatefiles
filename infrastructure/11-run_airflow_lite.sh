@@ -91,4 +91,4 @@ exit 1
 EOF
 
 chmod +x run_airflow_optionA.sh
-bash -n run_airflow_optionA.sh && echo "OK: syntax"
+bash run_airflow_optionA.sh && echo "OK: syntax"
