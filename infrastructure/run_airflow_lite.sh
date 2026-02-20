@@ -1,3 +1,6 @@
+cd /home/ssm-user/airflow-docker
+
+cat > run_airflow_lite.sh <<'EOF'
 #!/bin/bash
 set -euo pipefail
 
@@ -7,16 +10,38 @@ COMPOSE_FILE="${PROJECT_DIR}/docker-compose.lite.yaml"
 cd "${PROJECT_DIR}"
 
 echo "========================================="
-echo "Pre-check: Docker y Compose"
+echo "Pre-check: Docker y Docker Compose"
 echo "========================================="
-if ! docker ps >/dev/null 2>&1; then
-  DOCKER_CMD="sudo docker"
-else
-  DOCKER_CMD="docker"
+
+# Require docker
+if ! command -v docker >/dev/null 2>&1; then
+  echo "ERROR: docker no está instalado o no está en PATH"
+  echo "En Amazon Linux 2 instala con:"
+  echo "  sudo yum update -y"
+  echo "  sudo amazon-linux-extras install -y docker"
+  echo "  sudo systemctl enable --now docker"
+  exit 1
 fi
 
-${DOCKER_CMD} version
-${DOCKER_CMD} compose version
+# Require docker-compose (binario)
+if ! command -v docker-compose >/dev/null 2>&1; then
+  echo "ERROR: docker-compose no está instalado o no está en PATH"
+  echo "Instala docker-compose v2 binario con:"
+  echo "  sudo curl -L \"https://github.com/docker/compose/releases/download/v2.29.7/docker-compose-linux-x86_64\" -o /usr/local/bin/docker-compose"
+  echo "  sudo chmod +x /usr/local/bin/docker-compose"
+  exit 1
+fi
+
+# Decide whether to use sudo for docker-compose based on docker socket access
+if docker ps >/dev/null 2>&1; then
+  DC="docker-compose"
+else
+  DC="sudo docker-compose"
+fi
+
+echo "Using: ${DC}"
+docker --version
+${DC} version
 
 if [ ! -f "${COMPOSE_FILE}" ]; then
   echo "ERROR: No existe ${COMPOSE_FILE}"
@@ -24,9 +49,9 @@ if [ ! -f "${COMPOSE_FILE}" ]; then
 fi
 
 echo "========================================="
-echo "Validando docker compose config"
+echo "Validando docker-compose config"
 echo "========================================="
-${DOCKER_CMD} compose -f "${COMPOSE_FILE}" config >/dev/null
+${DC} -f "${COMPOSE_FILE}" config >/dev/null
 echo "OK: compose config"
 
 echo "========================================="
@@ -39,25 +64,25 @@ echo "========================================="
 echo "Inicializando Airflow (airflow-init)"
 echo "========================================="
 set +e
-${DOCKER_CMD} compose -f "${COMPOSE_FILE}" up airflow-init
+${DC} -f "${COMPOSE_FILE}" up airflow-init
 INIT_RC=$?
 set -e
 
 if [ $INIT_RC -ne 0 ]; then
   echo "ERROR: airflow-init falló. Mostrando logs:"
-  ${DOCKER_CMD} compose -f "${COMPOSE_FILE}" logs --tail=200 airflow-init || true
+  ${DC} -f "${COMPOSE_FILE}" logs --tail=200 airflow-init || true
   exit $INIT_RC
 fi
 
 echo "========================================="
 echo "Levantando servicios (up -d)"
 echo "========================================="
-${DOCKER_CMD} compose -f "${COMPOSE_FILE}" up -d
+${DC} -f "${COMPOSE_FILE}" up -d
 
 echo "========================================="
 echo "Estado de contenedores"
 echo "========================================="
-${DOCKER_CMD} compose -f "${COMPOSE_FILE}" ps
+${DC} -f "${COMPOSE_FILE}" ps
 
 echo "========================================="
 echo "Validación local de UI"
@@ -73,8 +98,12 @@ echo "Usuario: airflow"
 echo "Password: airflow"
 echo
 echo "Comandos útiles:"
-echo "  ${DOCKER_CMD} compose -f ${COMPOSE_FILE} logs -f --tail=200 airflow-webserver"
-echo "  ${DOCKER_CMD} compose -f ${COMPOSE_FILE} logs -f --tail=200 airflow-scheduler"
-echo "  ${DOCKER_CMD} compose -f ${COMPOSE_FILE} logs -f --tail=200 postgres"
-echo "  ${DOCKER_CMD} compose -f ${COMPOSE_FILE} down"
-echo "  ${DOCKER_CMD} compose -f ${COMPOSE_FILE} down -v  # reset total"
+echo "  ${DC} -f ${COMPOSE_FILE} logs -f --tail=200 airflow-webserver"
+echo "  ${DC} -f ${COMPOSE_FILE} logs -f --tail=200 airflow-scheduler"
+echo "  ${DC} -f ${COMPOSE_FILE} logs -f --tail=200 postgres"
+echo "  ${DC} -f ${COMPOSE_FILE} down"
+echo "  ${DC} -f ${COMPOSE_FILE} down -v  # reset total"
+EOF
+
+chmod +x run_airflow_lite.sh
+bash -n run_airflow_lite.sh && echo "OK: syntax"
