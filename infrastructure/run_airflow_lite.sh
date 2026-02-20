@@ -1,3 +1,8 @@
+sudo yum update -y
+sudo amazon-linux-extras install -y docker
+sudo systemctl enable --now docker
+docker --version || sudo docker --version
+
 cd /home/ssm-user/airflow-docker
 
 cat > run_airflow_lite.sh <<'EOF'
