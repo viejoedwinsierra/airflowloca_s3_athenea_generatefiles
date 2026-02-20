@@ -1,3 +1,178 @@
+~ $ 
+
+
+
+
+~ $ mkdir practice
+mkdir: cannot create directory ‘practice’: File exists
+~ $ cd practice
+practice $ 
+practice $ cat > create_infra_EC2.sh <<'EOF'
+> #!/bin/bash
+> # ============================================================
+> # Create EC2 (Amazon Linux 2) for Airflow - AWS Academy
+> # Region: us-east-1
+> # Uses: LabInstanceProfile
+> # ============================================================
+> 
+> set -euo pipefail
+> 
+> REGION="us-east-1"
+> INSTANCE_TYPE="t3.small"
+> SECURITY_GROUP_NAME="bd-airflow-sg"
+> INSTANCE_NAME="bd-airflow-ec2-$(date +%Y%m%d-%H%M%S)"
+> KEY_NAME="${KEY_NAME:-}"                 # opcional: export KEY_NAME=mi-keypair
+> MY_IP_CIDR="${MY_IP_CIDR:-0.0.0.0/0}"    # recomendado: export MY_IP_CIDR="TU_IP/32"
+> 
+> export AWS_REGION="$REGION"
+> export AWS_DEFAULT_REGION="$REGION"
+> 
+> echo "==> Region: $REGION"
+> 
+> echo "==> Getting latest Amazon Linux 2 AMI via SSM"
+> AMI_ID=$(aws ssm get-parameter \
+>   --name /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2 \
+>   --query "Parameter.Value" \
+>   --output text)
+> 
+> if [[ -z "${AMI_ID}" || "${AMI_ID}" == "None" ]]; then
+>   echo "ERROR: No AMI found for Amazon Linux 2 in ${REGION}"
+>   exit 1
+> fi
+> echo "==> AMI_ID=${AMI_ID}"
+> 
+> echo "==> Getting default VPC"
+> VPC_ID=$(aws ec2 describe-vpcs --filters "Name=isDefault,Values=true" --query "Vpcs[0].VpcId" --output text)
+> if [[ -z "${VPC_ID}" || "${VPC_ID}" == "None" ]]; then
+>   echo "ERROR: Default VPC not found in ${REGION}"
+>   exit 1
+> fi
+> echo "==> VPC_ID=${VPC_ID}"
+> 
+> echo "==> Ensuring security group ${SECURITY_GROUP_NAME}"
+> SG_ID=$(aws ec2 describe-security-groups \
+>   --filters "Name=group-name,Values=${SECURITY_GROUP_NAME}" "Name=vpc-id,Values=${VPC_ID}" \
+>   --query "SecurityGroups[0].GroupId" --output text 2>/dev/null || true)
+> 
+> if [[ -z "${SG_ID}" || "${SG_ID}" == "None" ]]; then
+>   SG_ID=$(aws ec2 create-security-group \
+>     --group-name "${SECURITY_GROUP_NAME}" \
+>     --description "Security group for Airflow EC2 (SSH + 8080)" \
+>     --vpc-id "${VPC_ID}" \
+>     --query "GroupId" --output text)
+>   echo "==> Created SG_ID=${SG_ID}"
+> else
+>   echo "==> Found SG_ID=${SG_ID}"
+> fi
+> 
+> echo "==> Authorizing inbound rules (SSH 22, Airflow 8080) from ${MY_IP_CIDR}"
+> aws ec2 authorize-security-group-ingress \
+>   --group-id "${SG_ID}" \
+>   --ip-permissions "IpProtocol=tcp,FromPort=22,ToPort=22,IpRanges=[{CidrIp=${MY_IP_CIDR},Description='SSH'}]" \
+>   >/dev/null 2>&1 || true
+> 
+> aws ec2 authorize-security-group-ingress \
+>   --group-id "${SG_ID}" \
+>   --ip-permissions "IpProtocol=tcp,FromPort=8080,ToPort=8080,IpRanges=[{CidrIp=${MY_IP_CIDR},Description='Airflow Web'}]" \
+>   >/dev/null 2>&1 || true
+> 
+> echo "==> Selecting a subnet (default VPC)"
+> SUBNET_ID=$(aws ec2 describe-subnets \
+>   --filters "Name=vpc-id,Values=${VPC_ID}" \
+>   --query "Subnets | sort_by(@,&AvailabilityZone)[0].SubnetId" \
+>   --output text)
+> 
+> if [[ -z "${SUBNET_ID}" || "${SUBNET_ID}" == "None" ]]; then
+>   echo "ERROR: Subnet not found in VPC ${VPC_ID}"
+>   exit 1
+> fi
+> echo "==> SUBNET_ID=${SUBNET_ID}"
+> 
+> echo "==> Launching EC2 instance..."
+> TAG_SPEC="ResourceType=instance,Tags=[{Key=Name,Value=${INSTANCE_NAME}}]"
+> 
+> RUN_ARGS=(
+>   --image-id "${AMI_ID}"
+>   --count 1
+>   --instance-type "${INSTANCE_TYPE}"
+>   --security-group-ids "${SG_ID}"
+>   --subnet-id "${SUBNET_ID}"
+>   --iam-instance-profile Name=LabInstanceProfile
+>   --tag-specifications "${TAG_SPEC}"
+> )
+> 
+> if [[ -n "${KEY_NAME}" ]]; then
+>   RUN_ARGS+=( --key-name "${KEY_NAME}" )
+>   echo "==> Using KEY_NAME=${KEY_NAME}"
+> else
+>   echo "==> KEY_NAME not set (no SSH key pair will be attached)"
+> fi
+> 
+> INSTANCE_ID=$(aws ec2 run-instances "${RUN_ARGS[@]}" --query "Instances[0].InstanceId" --output text)
+> echo "==> INSTANCE_ID=${INSTANCE_ID}"
+> 
+> echo "==> Waiting until instance is running..."
+> aws ec2 wait instance-running --instance-ids "${INSTANCE_ID}"
+> 
+> PUBLIC_IP=$(aws ec2 describe-instances --instance-ids "${INSTANCE_ID}" --query "Reservations[0].Instances[0].PublicIpAddress" --output text)
+> PUBLIC_DNS=$(aws ec2 describe-instances --instance-ids "${INSTANCE_ID}" --query "Reservations[0].Instances[0].PublicDnsName" --output text)
+> 
+> echo "==> Ready!"
+> echo "    Name: ${INSTANCE_NAME}"
+> echo "    InstanceId: ${INSTANCE_ID}"
+> echo "    Public IP: ${PUBLIC_IP}"
+> echo "    Public DNS: ${PUBLIC_DNS}"
+> echo "    Airflow URL (after install): http://${PUBLIC_IP}:8080"
+> EOF
+practice $ 
+practice $ ls -ltr
+total 4
+-rwxr-xr-x. 1 cloudshell-user cloudshell-user 4094 Feb 20 16:08 create_infra_EC2.sh
+practice $ 
+practice $ chmod +x create_infra_EC2.sh
+practice $ ls -l create_infra_EC2.sh
+-rwxr-xr-x. 1 cloudshell-user cloudshell-user 4094 Feb 20 16:08 create_infra_EC2.sh
+practice $ ./create_infra_EC2.sh
+==> Region: us-east-1
+==> Getting latest Amazon Linux 2 AMI via SSM
+==> AMI_ID=ami-0199fa5fada510433
+==> Getting default VPC
+==> VPC_ID=vpc-0a9bfa6bde2059bb2
+==> Ensuring security group bd-airflow-sg
+==> Found SG_ID=sg-07c4293ecdde1d21b
+==> Authorizing inbound rules (SSH 22, Airflow 8080) from 0.0.0.0/0
+==> Selecting a subnet (default VPC)
+==> SUBNET_ID=subnet-0fc23064593ec9708
+==> Launching EC2 instance...
+==> KEY_NAME not set (no SSH key pair will be attached)
+==> INSTANCE_ID=i-0bc8cdf4e76dd12df
+==> Waiting until instance is running...
+==> Ready!
+    Name: bd-airflow-ec2-20260220-160851
+    InstanceId: i-0bc8cdf4e76dd12df
+    Public IP: 44.201.225.188
+    Public DNS: ec2-44-201-225-188.compute-1.amazonaws.com
+    Airflow URL (after install): http://44.201.225.188:8080
+practice $ echo "==> Conectar en la instancia!"
+==> Conectar en la instancia!
+practice $ aws ssm start-session --target i-0bc8cdf4e76dd12df
+
+Starting session with SessionId: user4797248=edwin.sierra-p@mail.escuelaing.edu.co-8lig6gs7gogogqttt5cl8o469u
+sh-4.2$ cd /home/ssm-user && pwd
+/home/ssm-user
+sh-4.2$ #instalaar doker 
+sh-4.2$ sudo yum update -y
+Loaded plugins: extras_suggestions, langpacks, priorities, update-motd
+No packages marked for update
+sh-4.2$ sudo amazon-linux-extras install -y docker
+Installing docker
+Loaded plugins: extras_suggestions, langpacks, priorities, update-motd
+Cleaning repos: amzn2-core amzn2extra-docker
+12 metadata files removed
+4 sqlite files removed
+0 metadata files removed
+Loaded plugins: extras_suggestions, langpacks, priorities, update-motd
+amzn2-core                                                                                                                                                                                          | 3.6 kB  00:00:00     
 amzn2extra-docker                                                                                                                                                                                   | 2.9 kB  00:00:00     
 (1/5): amzn2-core/2/x86_64/group_gz                                                                                                                                                                 | 2.7 kB  00:00:00     
 (2/5): amzn2-core/2/x86_64/updateinfo                                                                                                                                                               | 1.2 MB  00:00:00     
@@ -38,13 +213,13 @@ Install  1 Package (+4 Dependent packages)
 Total download size: 71 M
 Installed size: 261 M
 Downloading packages:
-(1/5): libcgroup-0.41-21.amzn2.x86_64.rpm                                                                                                                                                           |  66 kB  00:00:00     
-(2/5): pigz-2.3.4-1.amzn2.0.1.x86_64.rpm                                                                                                                                                            |  81 kB  00:00:00     
+(1/5): pigz-2.3.4-1.amzn2.0.1.x86_64.rpm                                                                                                                                                            |  81 kB  00:00:00     
+(2/5): libcgroup-0.41-21.amzn2.x86_64.rpm                                                                                                                                                           |  66 kB  00:00:00     
 (3/5): containerd-2.1.5-1.amzn2.0.5.x86_64.rpm                                                                                                                                                      |  20 MB  00:00:00     
 (4/5): runc-1.3.4-2.amzn2.x86_64.rpm                                                                                                                                                                | 3.9 MB  00:00:00     
 (5/5): docker-25.0.14-1.amzn2.0.2.x86_64.rpm                                                                                                                                                        |  46 MB  00:00:00     
 ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-Total                                                                                                                                                                                       99 MB/s |  71 MB  00:00:00     
+Total                                                                                                                                                                                       85 MB/s |  71 MB  00:00:00     
 Running transaction check
 Running transaction test
 Transaction test succeeded
@@ -116,295 +291,30 @@ sh-4.2$ sudo systemctl enable --now docker
 Created symlink from /etc/systemd/system/multi-user.target.wants/docker.service to /usr/lib/systemd/system/docker.service.
 sh-4.2$ docker --version || sudo docker --version
 Docker version 25.0.14, build 0bab007
+sh-4.2$ #installar comp¿se
+sh-4.2$ 
 sh-4.2$ sudo curl -L "https://github.com/docker/compose/releases/download/v2.29.7/docker-compose-linux-x86_64" -o /usr/local/bin/docker-compose
   % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
                                  Dload  Upload   Total   Spent    Left  Speed
   0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
-100 60.8M  100 60.8M    0     0   206M      0 --:--:-- --:--:-- --:--:--  409M
+100 60.8M  100 60.8M    0     0   163M      0 --:--:-- --:--:-- --:--:--  163M
 sh-4.2$ sudo chmod +x /usr/local/bin/docker-compose
 sh-4.2$ docker-compose version
 Docker Compose version v2.29.7
-sh-4.2$ cd /home/ssm-user/airflow-docker
-sh-4.2$ ./run_airflow_lite.sh
-=========================================
-Pre-check: Docker y Docker Compose
-=========================================
-Using: sudo docker-compose
-Docker version 25.0.14, build 0bab007
-sudo: docker-compose: command not found
-sh-4.2$ ls -ltr
-total 8
--rw-r--r-- 1 ssm-user ssm-user 2765 Feb 20 05:13 docker-compose.lite.yaml
--rwxr-xr-x 1 ssm-user ssm-user 3305 Feb 20 05:21 run_airflow_lite.sh
-sh-4.2$ rm run_airflow_lite.sh 
-sh-4.2$ cat > run_airflow_lite.sh <<'EOF'
-> #!/bin/bash
-> set -euo pipefail
-> 
-> PROJECT_DIR="${HOME}/airflow-docker"
-> COMPOSE_FILE="${PROJECT_DIR}/docker-compose.lite.yaml"
-> 
-> cd "${PROJECT_DIR}"
-> 
-> echo "========================================="
-> echo "Pre-check: Docker y Docker Compose"
-> echo "========================================="
-> 
-> # Require docker
-> if ! command -v docker >/dev/null 2>&1; then
->   echo "ERROR: docker no está instalado o no está en PATH"
->   echo "En Amazon Linux 2 instala con:"
->   echo "  sudo yum update -y"
->   echo "  sudo amazon-linux-extras install -y docker"
->   echo "  sudo systemctl enable --now docker"
->   exit 1
-> fi
-> 
-> # Require docker-compose (binario)
-> if ! command -v docker-compose >/dev/null 2>&1; then
->   echo "ERROR: docker-compose no está instalado o no está en PATH"
->   echo "Instala docker-compose v2 binario con:"
->   echo "  sudo curl -L \"https://github.com/docker/compose/releases/download/v2.29.7/docker-compose-linux-x86_64\" -o /usr/local/bin/docker-compose"
->   echo "  sudo chmod +x /usr/local/bin/docker-compose"
->   exit 1
-> fi
-> 
-> # Decide whether to use sudo for docker-compose based on docker socket access
-> if docker ps >/dev/null 2>&1; then
->   DC="docker-compose"
-> else
->   DC="sudo docker-compose"
-> fi
-> 
-> echo "Using: ${DC}"
-> docker --version
-> ${DC} version
-> 
-> if [ ! -f "${COMPOSE_FILE}" ]; then
->   echo "ERROR: No existe ${COMPOSE_FILE}"
->   exit 1
-> fi
-> 
-> echo "========================================="
-> echo "Validando docker-compose config"
-> echo "========================================="
-> ${DC} -f "${COMPOSE_FILE}" config >/dev/null
-> echo "OK: compose config"
-> 
-> echo "========================================="
-> echo "Creando estructura local (dags/logs/plugins)"
-> echo "========================================="
-> mkdir -p dags logs plugins logs/dag_processor_manager
-> chmod -R 775 dags logs plugins
-> 
-> echo "========================================="
-> echo "Inicializando Airflow (airflow-init)"
-> echo "========================================="
-> set +e
-> ${DC} -f "${COMPOSE_FILE}" up airflow-init
-> INIT_RC=$?
-> set -e
-> 
-> if [ $INIT_RC -ne 0 ]; then
->   echo "ERROR: airflow-init falló. Mostrando logs:"
->   ${DC} -f "${COMPOSE_FILE}" logs --tail=200 airflow-init || true
->   exit $INIT_RC
-> fi
-> 
-> echo "========================================="
-> echo "Levantando servicios (up -d)"
-> echo "========================================="
-> ${DC} -f "${COMPOSE_FILE}" up -d
-> 
-> echo "========================================="
-> echo "Estado de contenedores"
-> echo "========================================="
-> ${DC} -f "${COMPOSE_FILE}" ps
-> 
-> echo "========================================="
-> echo "Validación local de UI"
-> echo "========================================="
-> curl -fsSI http://localhost:8080 >/dev/null && echo "OK: Airflow responde en localhost:8080" || echo "WARN: aún no responde, revisa logs"
-> 
-> echo
-> echo "========================================="
-> echo "Airflow LITE está corriendo"
-> echo "========================================="
-> echo "URL: http://<EC2_PUBLIC_IP>:8080"
-> echo "Usuario: airflow"
-> echo "Password: airflow"
-> echo
-> echo "Comandos útiles:"
-> echo "  ${DC} -f ${COMPOSE_FILE} logs -f --tail=200 airflow-webserver"
-> echo "  ${DC} -f ${COMPOSE_FILE} logs -f --tail=200 airflow-scheduler"
-> echo "  ${DC} -f ${COMPOSE_FILE} logs -f --tail=200 postgres"
-> echo "  ${DC} -f ${COMPOSE_FILE} down"
-> echo "  ${DC} -f ${COMPOSE_FILE} down -v  # reset total"
-> EOF
 sh-4.2$ 
-sh-4.2$ chmod +x run_airflow_lite.sh
-sh-4.2$ ls -ltr
-total 8
--rw-r--r-- 1 ssm-user ssm-user 2765 Feb 20 05:13 docker-compose.lite.yaml
--rwxr-xr-x 1 ssm-user ssm-user 3305 Feb 20 05:25 run_airflow_lite.sh
-sh-4.2$ bash run_airflow_lite.sh
-=========================================
-Pre-check: Docker y Docker Compose
-=========================================
-Using: sudo docker-compose
-Docker version 25.0.14, build 0bab007
-sudo: docker-compose: command not found
-sh-4.2$ sudo usermod -aG docker ssm-user
-sh-4.2$ exit
-exit
-
-
-Exiting session with sessionId: user4797248=edwin.sierra-p@mail.escuelaing.edu.co-nds2k3naipyu9g33dzr63uc5fu.
-
-practice $ aws ssm start-session --target i-079ec2fd29e780141
-
-Starting session with SessionId: user4797248=edwin.sierra-p@mail.escuelaing.edu.co-l79jvug6tr8oxf2n9aevd5k72i
-sh-4.2$ id
-uid=1001(ssm-user) gid=1001(ssm-user) groups=1001(ssm-user),992(docker)
-sh-4.2$ docker ps
-CONTAINER ID   IMAGE     COMMAND   CREATED   STATUS    PORTS     NAMES
-sh-4.2$ docker-compose version
-Docker Compose version v2.29.7
-sh-4.2$ cd /home/ssm-user/airflow-docker
-sh-4.2$ bash run_airflow_lite.sh
-=========================================
-Pre-check: Docker y Docker Compose
-=========================================
-Using: docker-compose
-Docker version 25.0.14, build 0bab007
-Docker Compose version v2.29.7
-=========================================
-Validando docker-compose config
-=========================================
-OK: compose config
-=========================================
-Creando estructura local (dags/logs/plugins)
-=========================================
-=========================================
-Inicializando Airflow (airflow-init)
-=========================================
-[+] Running 37/2
- ✔ airflow-init Pulled                                                                                                                                                                                               32.5s 
- ✔ postgres Pulled                                                                                                                                                                                                   13.8s 
-[+] Running 4/3
- ✔ Network airflow-docker_default              Created                                                                                                                                                                0.1s 
- ✔ Volume "airflow-docker_postgres-db-volume"  Created                                                                                                                                                                0.0s 
- ✔ Container airflow-postgres                  Created                                                                                                                                                                0.4s 
- ✔ Container airflow-init                      Created                                                                                                                                                                0.0s 
-Attaching to airflow-init
-airflow-init  | ....................
-airflow-init  | ERROR! Maximum number of retries (20) reached.
-airflow-init  | 
-airflow-init  | Last check result:
-airflow-init  | $ airflow db check
-airflow-init  | Unable to load the config, contains a configuration error.
-airflow-init  | Traceback (most recent call last):
-airflow-init  |   File "/usr/local/lib/python3.12/pathlib.py", line 1311, in mkdir
-airflow-init  |     os.mkdir(self, mode)
-airflow-init  | FileNotFoundError: [Errno 2] No such file or directory: '/opt/airflow/logs/scheduler/2026-02-20'
-airflow-init  | 
-airflow-init  | During handling of the above exception, another exception occurred:
-airflow-init  | 
-airflow-init  | Traceback (most recent call last):
-airflow-init  |   File "/usr/local/lib/python3.12/logging/config.py", line 608, in configure
-airflow-init  |     handler = self.configure_handler(handlers[name])
-airflow-init  |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-airflow-init  |   File "/usr/local/lib/python3.12/logging/config.py", line 876, in configure_handler
-airflow-init  |     result = factory(**kwargs)
-airflow-init  |              ^^^^^^^^^^^^^^^^^
-airflow-init  |   File "/home/airflow/.local/lib/python3.12/site-packages/airflow/utils/log/file_processor_handler.py", line 53, in __init__
-airflow-init  |     Path(self._get_log_directory()).mkdir(parents=True, exist_ok=True)
-airflow-init  |   File "/usr/local/lib/python3.12/pathlib.py", line 1315, in mkdir
-airflow-init  |     self.parent.mkdir(parents=True, exist_ok=True)
-airflow-init  |   File "/usr/local/lib/python3.12/pathlib.py", line 1311, in mkdir
-airflow-init  |     os.mkdir(self, mode)
-airflow-init  | PermissionError: [Errno 13] Permission denied: '/opt/airflow/logs/scheduler'
-airflow-init  | 
-airflow-init  | The above exception was the direct cause of the following exception:
-airflow-init  | 
-airflow-init  | Traceback (most recent call last):
-airflow-init  |   File "/home/airflow/.local/bin/airflow", line 5, in <module>
-airflow-init  |     from airflow.__main__ import main
-airflow-init  |   File "/home/airflow/.local/lib/python3.12/site-packages/airflow/__init__.py", line 74, in <module>
-airflow-init  |     settings.initialize()
-airflow-init  |   File "/home/airflow/.local/lib/python3.12/site-packages/airflow/settings.py", line 785, in initialize
-airflow-init  |     LOGGING_CLASS_PATH = configure_logging()
-airflow-init  |                          ^^^^^^^^^^^^^^^^^^^
-airflow-init  |   File "/home/airflow/.local/lib/python3.12/site-packages/airflow/logging_config.py", line 74, in configure_logging
-airflow-init  |     raise e
-airflow-init  |   File "/home/airflow/.local/lib/python3.12/site-packages/airflow/logging_config.py", line 69, in configure_logging
-airflow-init  |     dictConfig(logging_config)
-airflow-init  |   File "/usr/local/lib/python3.12/logging/config.py", line 942, in dictConfig
-airflow-init  |     dictConfigClass(config).configure()
-airflow-init  |   File "/usr/local/lib/python3.12/logging/config.py", line 615, in configure
-airflow-init  |     raise ValueError('Unable to configure handler '
-airflow-init  | ValueError: Unable to configure handler 'processor'
-airflow-init  | 
-airflow-init exited with code 1
-=========================================
-Levantando servicios (up -d)
-=========================================
-[+] Running 4/4
- ✔ Container airflow-postgres   Healthy                                                                                                                                                                               0.6s 
- ✔ Container airflow-init       Started                                                                                                                                                                               1.6s 
- ✔ Container airflow-webserver  Started                                                                                                                                                                               1.7s 
- ✔ Container airflow-scheduler  Started                                                                                                                                                                               1.3s 
-=========================================
-Estado de contenedores
-=========================================
-NAME                IMAGE                   COMMAND                  SERVICE             CREATED              STATUS                                     PORTS
-airflow-init        apache/airflow:2.10.3   "/usr/bin/dumb-init …"   airflow-init        About a minute ago   Up Less than a second                      8080/tcp
-airflow-postgres    postgres:16             "docker-entrypoint.s…"   postgres            About a minute ago   Up About a minute (healthy)                5432/tcp
-airflow-scheduler   apache/airflow:2.10.3   "/usr/bin/dumb-init …"   airflow-scheduler   1 second ago         Up Less than a second                      8080/tcp
-airflow-webserver   apache/airflow:2.10.3   "/usr/bin/dumb-init …"   airflow-webserver   1 second ago         Up Less than a second (health: starting)   0.0.0.0:8080->8080/tcp, :::8080->8080/tcp
-=========================================
-Validación local de UI
-=========================================
-curl: (56) Recv failure: Connection reset by peer
-WARN: aún no responde, revisa logs
-
-=========================================
-Airflow LITE está corriendo
-=========================================
-URL: http://<EC2_PUBLIC_IP>:8080
-Usuario: airflow
-Password: airflow
-
-Comandos útiles:
-  docker-compose -f /home/ssm-user/airflow-docker/docker-compose.lite.yaml logs -f --tail=200 airflow-webserver
-  docker-compose -f /home/ssm-user/airflow-docker/docker-compose.lite.yaml logs -f --tail=200 airflow-scheduler
-  docker-compose -f /home/ssm-user/airflow-docker/docker-compose.lite.yaml logs -f --tail=200 postgres
-  docker-compose -f /home/ssm-user/airflow-docker/docker-compose.lite.yaml down
-  docker-compose -f /home/ssm-user/airflow-docker/docker-compose.lite.yaml down -v  # reset total
-sh-4.2$ cd /home/ssm-user/airflow-docker
-sh-4.2$ docker-compose -f docker-compose.lite.yaml down
-[+] Running 5/5
- ✔ Container airflow-init          Removed                                                                                                                                                                            0.6s 
- ✔ Container airflow-scheduler     Removed                                                                                                                                                                            0.6s 
- ✔ Container airflow-webserver     Removed                                                                                                                                                                            0.6s 
- ✔ Container airflow-postgres      Removed                                                                                                                                                                            0.3s 
- ✔ Network airflow-docker_default  Removed                                                                                                                                                                            0.1s 
-sh-4.2$ cd /home/ssm-user/airflow-docker
-sh-4.2$ sudo chown -R 50000:0 logs dags plugins
-sh-4.2$ sudo chmod -R 775 logs dags plugins
-sh-4.2$ ls -ld logs dags plugins
-drwxrwxr-x 2 50000 root  6 Feb 20 05:28 dags
-drwxrwxr-x 3 50000 root 35 Feb 20 05:28 logs
-drwxrwxr-x 2 50000 root  6 Feb 20 05:28 plugins
-sh-4.2$ ls -la logs | head
-total 0
-drwxrwxr-x 3    50000 root      35 Feb 20 05:28 .
-drwxr-xr-x 5 ssm-user ssm-user 104 Feb 20 05:28 ..
-drwxrwxr-x 2    50000 root       6 Feb 20 05:28 dag_processor_manager
-sh-4.2$ rm docker-compose.lite.yaml
-sh-4.2$ pwd 
-/home/ssm-user/airflow-docker
-sh-4.2$ cat > docker-compose.lite.yaml <<'EOF'
+sh-4.2$ mkdir -p ~/bin ~/airflow-lite
+sh-4.2$ chmod 700 ~/bin
+sh-4.2$ 
+sh-4.2$ #ir a directorio
+sh-4.2$ cd /home/ssm-user/airflow-lite &&
+> 
+> ^C
+sh-4.2$ cd /home/ssm-user/airflow-lite
+sh-4.2$ pwd
+/home/ssm-user/airflow-lite
+sh-4.2$ pwd
+/home/ssm-user/airflow-lite
+sh-4.2$ cat > docker-compose.lite.yaml << EOF
 > services:
 >   postgres:
 >     image: postgres:16
@@ -502,59 +412,358 @@ sh-4.2$ cat > docker-compose.lite.yaml <<'EOF'
 > volumes:
 >   postgres-db-volume:
 > EOF
-sh-4.2$ ls -ltr
-total 8
--rwxr-xr-x 1 ssm-user ssm-user 3305 Feb 20 05:25 run_airflow_lite.sh
-drwxrwxr-x 2    50000 root        6 Feb 20 05:28 plugins
-drwxrwxr-x 3    50000 root       35 Feb 20 05:28 logs
-drwxrwxr-x 2    50000 root        6 Feb 20 05:28 dags
--rw-r--r-- 1 ssm-user ssm-user 2831 Feb 20 05:38 docker-compose.lite.yaml
-sh-4.2$ bash run_airflow_lite.sh 
-=========================================
-Pre-check: Docker y Docker Compose
-=========================================
-Using: docker-compose
-Docker version 25.0.14, build 0bab007
+sh-4.2$ pwd && ls -ltr
+/home/ssm-user/airflow-lite
+total 4
+-rw-r--r-- 1 ssm-user ssm-user 2831 Feb 20 16:14 docker-compose.lite.yaml
+sh-4.2$ #archivo para ejecitar
+sh-4.2$ rm run_airflow_optionA.sh
+ags plugins
+sudo chmod -R u+rwX,g+rX,o+rX logs dags plugins
+
+log "== Ejecutando airflow-init =="
+set +e
+${DC} -f "${COMPOSE_FILE}" up airflow-init
+INIT_RC=$?
+set -e
+
+if [[ "$INIT_RC" -ne 0 ]]; then
+  log "ERROR en airflow-init"
+  ${DC} -f "${COMPOSE_FILE}" logs --tail=200 airflow-init || true
+  exit "$INIT_RC"
+fi
+
+log "== Levantando servicios =="
+${DC} -f "${COMPOSE_FILE}" up -d
+
+log "== Estado de contenedores =="
+${DC} -f "${COMPOSE_FILE}" ps
+
+log "== Esperando health 200 =="
+for i in $(seq 1 40); do
+  CODE="$(curl -s -o /dev/null -w "%{http_code}" http://localhost:${AIRFLOW_PORT}/health || true)"
+  if [[ "$CODE" == "200" ]]; then
+    log "✅ OK: Airflow responde en puerto ${AIRFLOW_PORT}"
+    exit 0
+  fi
+  sleep 2
+done
+
+log "WARN: No respondió 200. Mostrando logs webserver:"
+${DC} -f "${COMPOSE_FILE}" logs --tail=200 airflow-webserver || true
+exit 1
+EOF
+
+chmod +x run_airflow_optionA.sh
+bash run_airflow_optionA.sh && echo "OK: syntax"rm: cannot remove ‘run_airflow_optionA.sh’: No such file or directory
+sh-4.2$ cat > run_airflow_optionA.sh <<'EOF'
+> #!/usr/bin/env bash
+> set -Eeuo pipefail
+> 
+> # ===== CONFIGURACIÓN (Opción A) =====
+> PROJECT_DIR="${PROJECT_DIR:-$HOME/airflow-lite}"
+> COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.lite.yaml}"
+> AIRFLOW_PORT="${AIRFLOW_PORT:-8080}"
+> 
+> log(){ printf "%s %s\n" "$(date -u +%FT%TZ)" "$*"; }
+> die(){ log "ERROR: $*"; exit 1; }
+> trap 'die "Fallo en línea ${BASH_LINENO[0]}: ${BASH_COMMAND}"' ERR
+> 
+> log "== Directorio del proyecto =="
+> log "${PROJECT_DIR}"
+> 
+> cd "${PROJECT_DIR}" 2>/dev/null || die "No existe ${PROJECT_DIR}"
+> [[ -f "${COMPOSE_FILE}" ]] || die "No existe ${PROJECT_DIR}/${COMPOSE_FILE}"
+> 
+> log "== Validando Docker =="
+> command -v docker >/dev/null 2>&1 || die "Docker no instalado"
+> 
+> if ! systemctl is-active docker >/dev/null 2>&1; then
+>   log "Iniciando docker..."
+>   sudo systemctl enable --now docker
+> fi
+> 
+> # ===== Resolver Compose (v2 plugin preferido) =====
+> log "== Validando Compose =="
+> NEED_SUDO=0
+> if ! docker ps >/dev/null 2>&1; then
+>   NEED_SUDO=1
+>   log "Docker requiere sudo en esta sesión"
+> fi
+> 
+> # Detectar compose v2 (docker compose) o v1 (docker-compose)
+> if [[ "$NEED_SUDO" -eq 0 ]] && docker compose version >/dev/null 2>&1; then
+>   DC="docker compose"
+> elif [[ "$NEED_SUDO" -eq 1 ]] && sudo docker compose version >/dev/null 2>&1; then
+>   DC="sudo docker compose"
+> elif [[ "$NEED_SUDO" -eq 0 ]] && command -v docker-compose >/dev/null 2>&1; then
+>   DC="docker-compose"
+> elif [[ "$NEED_SUDO" -eq 1 ]] && command -v docker-compose >/dev/null 2>&1; then
+>   # docker-compose existe pero docker requiere sudo → ejecutar con sudo
+>   DC="sudo docker-compose"
+> else
+>   die "No se encontró 'docker compose' (v2) ni 'docker-compose' (v1)."
+> fi
+> 
+> log "Usando: ${DC}"
+> 
+> log "== Validando compose config =="
+> ${DC} -f "${COMPOSE_FILE}" config >/dev/null
+> log "OK: compose válido"
+> 
+> # ===== Permisos Airflow (UID 50000) =====
+> log "== Ajustando permisos de logs/dags/plugins =="
+> ls -ld logs logs/scheduler 2>/dev/null || true
+> 
+> sudo mkdir -p logs dags plugins
+> sudo chown -R 50000:0 logs dags plugins
+> sudo chmod -R u+rwX,g+rX,o+rX logs dags plugins
+> 
+> log "== Ejecutando airflow-init =="
+> set +e
+> ${DC} -f "${COMPOSE_FILE}" up airflow-init
+> INIT_RC=$?
+> set -e
+> 
+> if [[ "$INIT_RC" -ne 0 ]]; then
+>   log "ERROR en airflow-init"
+>   ${DC} -f "${COMPOSE_FILE}" logs --tail=200 airflow-init || true
+>   exit "$INIT_RC"
+> fi
+> 
+> log "== Levantando servicios =="
+> ${DC} -f "${COMPOSE_FILE}" up -d
+> 
+> log "== Estado de contenedores =="
+> ${DC} -f "${COMPOSE_FILE}" ps
+> 
+> log "== Esperando health 200 =="
+> for i in $(seq 1 40); do
+>   CODE="$(curl -s -o /dev/null -w "%{http_code}" http://localhost:${AIRFLOW_PORT}/health || true)"
+>   if [[ "$CODE" == "200" ]]; then
+>     log "✅ OK: Airflow responde en puerto ${AIRFLOW_PORT}"
+>     exit 0
+>   fi
+>   sleep 2
+> done
+> 
+> log "WARN: No respondió 200. Mostrando logs webserver:"
+> ${DC} -f "${COMPOSE_FILE}" logs --tail=200 airflow-webserver || true
+> exit 1
+> EOF
+sh-4.2$ 
+sh-4.2$ chmod +x run_airflow_optionA.sh
+sh-4.2$ bash run_airflow_optionA.sh && echo "OK: syntax"
+2026-02-20T16:15:06Z == Directorio del proyecto ==
+2026-02-20T16:15:06Z /home/ssm-user/airflow-lite
+2026-02-20T16:15:06Z == Validando Docker ==
+2026-02-20T16:15:06Z == Validando Compose ==
+2026-02-20T16:15:06Z Docker requiere sudo en esta sesión
+2026-02-20T16:15:06Z Usando: sudo docker-compose
+2026-02-20T16:15:06Z == Validando compose config ==
+sudo: docker-compose: command not found
+2026-02-20T16:15:06Z ERROR: Fallo en línea 0: ${DC} -f "${COMPOSE_FILE}" config > /dev/null
+sh-4.2$ # 1) Verifica dónde está docker-compose
+sh-4.2$ command -v docker-compose
+/usr/local/bin/docker-compose
+sh-4.2$ ls -l /usr/local/bin/docker-compose
+-rwxr-xr-x 1 root root 63785037 Feb 20 16:12 /usr/local/bin/docker-compose
+sh-4.2$ 
+sh-4.2$ # 2) Prueba con sudo usando PATH explícito
+sh-4.2$ sudo env "PATH=$PATH" docker-compose version
 Docker Compose version v2.29.7
-=========================================
-Validando docker-compose config
-=========================================
-OK: compose config
-=========================================
-Creando estructura local (dags/logs/plugins)
-=========================================
-chmod: changing permissions of ‘dags’: Operation not permitted
-chmod: changing permissions of ‘logs’: Operation not permitted
-chmod: changing permissions of ‘logs/dag_processor_manager’: Operation not permitted
-chmod: changing permissions of ‘plugins’: Operation not permitted
-sh-4.2$ cd /home/ssm-user/airflow-docker
+sh-4.2$ #archivo para ejecitar
+sh-4.2$ rm -f run_airflow_optionA.sh
+ED_SUDO=1
+  log "Docker requiere sudo en esta sesión"
+fi
+
+# Detectar compose v2 (docker compose) o v1 (docker-compose)
+if [[ "$NEED_SUDO" -eq 0 ]] && docker compose version >/dev/null 2>&1; then
+  DC="docker compose"
+elif [[ "$NEED_SUDO" -eq 1 ]] && sudo -E env "PATH=$PATH" docker compose version >/dev/null 2>&1; then
+  DC="sudo -E env \"PATH=$PATH\" docker compose"
+elif [[ "$NEED_SUDO" -eq 0 ]] && command -v docker-compose >/dev/null 2>&1; then
+  DC="docker-compose"
+elif [[ "$NEED_SUDO" -eq 1 ]] && command -v docker-compose >/dev/null 2>&1; then
+  # docker-compose existe pero docker requiere sudo → ejecutar con sudo (heredando PATH)
+  DC="sudo -E env \"PATH=$PATH\" docker-compose"
+else
+  die "No se encontró 'docker compose' (v2) ni 'docker-compose' (v1)."
+fi
+
+log "Usando: ${DC}"
+
+log "== Validando compose config =="
+eval "${DC} -f \"${COMPOSE_FILE}\" config >/dev/null"
+log "OK: compose válido"
+
+# ===== Permisos Airflow (UID 50000) =====
+log "== Ajustando permisos de logs/dags/plugins =="
+ls -ld logs logs/scheduler 2>/dev/null || true
+
+sudo mkdir -p logs dags plugins
+sudo chown -R 50000:0 logs dags plugins
+sudo chmod -R u+rwX,g+rX,o+rX logs dags plugins
+
+log "== Ejecutando airflow-init =="
+set +e
+eval "${DC} -f \"${COMPOSE_FILE}\" up airflow-init"
+INIT_RC=$?
+set -e
+
+if [[ "$INIT_RC" -ne 0 ]]; then
+  log "ERROR en airflow-init"
+  eval "${DC} -f \"${COMPOSE_FILE}\" logs --tail=200 airflow-init || true"
+  exit "$INIT_RC"
+fi
+
+log "== Levantando servicios =="
+eval "${DC} -f \"${COMPOSE_FILE}\" up -d"
+
+log "== Estado de contenedores =="
+eval "${DC} -f \"${COMPOSE_FILE}\" ps"
+
+log "== Esperando health 200 =="
+for i in $(seq 1 40); do
+  CODE="$(curl -s -o /dev/null -w "%{http_code}" http://localhost:${AIRFLOW_PORT}/health || true)"
+  if [[ "$CODE" == "200" ]]; then
+    log "✅ OK: Airflow responde en puerto ${AIRFLOW_PORT}"
+    exit 0
+  fi
+  sleep 2
+done
+
+log "WARN: No respondió 200. Mostrando logs webserver:"
+eval "${DC} -f \"${COMPOSE_FILE}\" logs --tail=200 airflow-webserver || true"
+exit 1
+EOF
+
+chmod +x run_aish-4.2$ cat > run_airflow_optionA.sh <<'EOF'
+> #!/usr/bin/env bash
+> set -Eeuo pipefail
+> 
+> # ===== CONFIGURACIÓN (Opción A) =====
+> PROJECT_DIR="${PROJECT_DIR:-$HOME/airflow-lite}"
+> COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.lite.yaml}"
+> AIRFLOW_PORT="${AIRFLOW_PORT:-8080}"
+> 
+> log(){ printf "%s %s\n" "$(date -u +%FT%TZ)" "$*"; }
+> die(){ log "ERROR: $*"; exit 1; }
+> trap 'die "Fallo en línea ${BASH_LINENO[0]}: ${BASH_COMMAND}"' ERR
+> 
+> log "== Directorio del proyecto =="
+> log "${PROJECT_DIR}"
+> 
+> cd "${PROJECT_DIR}" 2>/dev/null || die "No existe ${PROJECT_DIR}"
+> [[ -f "${COMPOSE_FILE}" ]] || die "No existe ${PROJECT_DIR}/${COMPOSE_FILE}"
+> 
+> log "== Validando Docker =="
+> command -v docker >/dev/null 2>&1 || die "Docker no instalado"
+> 
+> if ! systemctl is-active docker >/dev/null 2>&1; then
+>   log "Iniciando docker..."
+>   sudo systemctl enable --now docker
+> fi
+> 
+> # ===== Resolver Compose (v2 plugin preferido) =====
+> log "== Validando Compose =="
+> NEED_SUDO=0
+> if ! docker ps >/dev/null 2>&1; then
+>   NEED_SUDO=1
+>   log "Docker requiere sudo en esta sesión"
+> fi
+> 
+> # Detectar compose v2 (docker compose) o v1 (docker-compose)
+> if [[ "$NEED_SUDO" -eq 0 ]] && docker compose version >/dev/null 2>&1; then
+>   DC="docker compose"
+> elif [[ "$NEED_SUDO" -eq 1 ]] && sudo -E env "PATH=$PATH" docker compose version >/dev/null 2>&1; then
+>   DC="sudo -E env \"PATH=$PATH\" docker compose"
+> elif [[ "$NEED_SUDO" -eq 0 ]] && command -v docker-compose >/dev/null 2>&1; then
+>   DC="docker-compose"
+> elif [[ "$NEED_SUDO" -eq 1 ]] && command -v docker-compose >/dev/null 2>&1; then
+>   # docker-compose existe pero docker requiere sudo → ejecutar con sudo (heredando PATH)
+>   DC="sudo -E env \"PATH=$PATH\" docker-compose"
+> else
+>   die "No se encontró 'docker compose' (v2) ni 'docker-compose' (v1)."
+> fi
+> 
+> log "Usando: ${DC}"
+> 
+> log "== Validando compose config =="
+> eval "${DC} -f \"${COMPOSE_FILE}\" config >/dev/null"
+> log "OK: compose válido"
+> 
+> # ===== Permisos Airflow (UID 50000) =====
+> log "== Ajustando permisos de logs/dags/plugins =="
+> ls -ld logs logs/scheduler 2>/dev/null || true
+> 
+> sudo mkdir -p logs dags plugins
+> sudo chown -R 50000:0 logs dags plugins
+> sudo chmod -R u+rwX,g+rX,o+rX logs dags plugins
+> 
+> log "== Ejecutando airflow-init =="
+> set +e
+> eval "${DC} -f \"${COMPOSE_FILE}\" up airflow-init"
+> INIT_RC=$?
+> set -e
+> 
+> if [[ "$INIT_RC" -ne 0 ]]; then
+>   log "ERROR en airflow-init"
+>   eval "${DC} -f \"${COMPOSE_FILE}\" logs --tail=200 airflow-init || true"
+>   exit "$INIT_RC"
+> fi
+> 
+> log "== Levantando servicios =="
+> eval "${DC} -f \"${COMPOSE_FILE}\" up -d"
+> 
+> log "== Estado de contenedores =="
+> eval "${DC} -f \"${COMPOSE_FILE}\" ps"
+> 
+> log "== Esperando health 200 =="
+> for i in $(seq 1 40); do
+>   CODE="$(curl -s -o /dev/null -w "%{http_code}" http://localhost:${AIRFLOW_PORT}/health || true)"
+>   if [[ "$CODE" == "200" ]]; then
+>     log "✅ OK: Airflow responde en puerto ${AIRFLOW_PORT}"
+>     exit 0
+>   fi
+>   sleep 2
+> done
+> 
+> log "WARN: No respondió 200. Mostrando logs webserver:"
+> eval "${DC} -f \"${COMPOSE_FILE}\" logs --tail=200 airflow-webserver || true"
+> exit 1
+> EOF
 sh-4.2$ 
-sh-4.2$ docker-compose -f docker-compose.lite.yaml down
-sh-4.2$ 
-sh-4.2$ mkdir -p dags logs plugins logs/scheduler logs/dag_processor_manager
-mkdir: cannot create directory ‘logs/scheduler’: Permission denied
-sh-4.2$ sudo chown -R 50000:0 logs dags plugins
-sh-4.2$ sudo chmod -R 775 logs dags plugins
-sh-4.2$ ls -ld dags logs plugins
-drwxrwxr-x 2 50000 root  6 Feb 20 05:28 dags
-drwxrwxr-x 3 50000 root 35 Feb 20 05:28 logs
-drwxrwxr-x 2 50000 root  6 Feb 20 05:28 plugins
-sh-4.2$ cd /home/ssm-user/airflow-docker
-sh-4.2$ 
-sh-4.2$ docker-compose -f docker-compose.lite.yaml up airflow-init
-[+] Running 3/2
- ✔ Network airflow-docker_default  Created                                                                                                                                                                            0.0s 
- ✔ Container airflow-postgres      Created                                                                                                                                                                            0.1s 
- ✔ Container airflow-init          Created                                                                                                                                                                            0.1s 
+sh-4.2$ chmod +x run_airflow_optionA.sh
+sh-4.2$ bash run_airflow_optionA.sh && echo "OK: syntax"
+2026-02-20T16:19:23Z == Directorio del proyecto ==
+2026-02-20T16:19:23Z /home/ssm-user/airflow-lite
+2026-02-20T16:19:23Z == Validando Docker ==
+2026-02-20T16:19:23Z == Validando Compose ==
+2026-02-20T16:19:23Z Docker requiere sudo en esta sesión
+2026-02-20T16:19:23Z Usando: sudo -E env "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin" docker-compose
+2026-02-20T16:19:23Z == Validando compose config ==
+2026-02-20T16:19:23Z OK: compose válido
+2026-02-20T16:19:23Z == Ajustando permisos de logs/dags/plugins ==
+2026-02-20T16:19:23Z == Ejecutando airflow-init ==
+[+] Running 37/2
+ ✔ airflow-init Pulled                                                                                                                                                                                               32.9s 
+ ✔ postgres Pulled                                                                                                                                                                                                   15.2s 
+[+] Running 4/4
+ ✔ Network airflow-lite_default              Created                                                                                                                                                                  0.1s 
+ ✔ Volume "airflow-lite_postgres-db-volume"  Created                                                                                                                                                                  0.0s 
+ ✔ Container airflow-postgres                Created                                                                                                                                                                  0.7s 
+ ✔ Container airflow-init                    Created                                                                                                                                                                  0.1s 
 Attaching to airflow-init
 airflow-init  | 
 airflow-init  | /home/airflow/.local/lib/python3.12/site-packages/airflow/configuration.py:859 FutureWarning: section/key [core/sql_alchemy_conn] has been deprecated, you should use[database/sql_alchemy_conn] instead. Please update your `conf.get*` call to use the new name
 airflow-init  | DB: postgresql+psycopg2://airflow:***@postgres/airflow
 airflow-init  | Performing upgrade to the metadata database postgresql+psycopg2://airflow:***@postgres/airflow
-airflow-init  | [2026-02-20T05:40:45.700+0000] {migration.py:207} INFO - Context impl PostgresqlImpl.
-airflow-init  | [2026-02-20T05:40:45.701+0000] {migration.py:210} INFO - Will assume transactional DDL.
-airflow-init  | [2026-02-20T05:40:45.703+0000] {migration.py:207} INFO - Context impl PostgresqlImpl.
-airflow-init  | [2026-02-20T05:40:45.704+0000] {migration.py:210} INFO - Will assume transactional DDL.
+airflow-init  | [2026-02-20T16:20:24.032+0000] {migration.py:207} INFO - Context impl PostgresqlImpl.
+airflow-init  | [2026-02-20T16:20:24.034+0000] {migration.py:210} INFO - Will assume transactional DDL.
+airflow-init  | [2026-02-20T16:20:24.035+0000] {migration.py:207} INFO - Context impl PostgresqlImpl.
+airflow-init  | [2026-02-20T16:20:24.036+0000] {migration.py:210} INFO - Will assume transactional DDL.
 airflow-init  | INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
 airflow-init  | INFO  [alembic.runtime.migration] Will assume transactional DDL.
 airflow-init  | INFO  [alembic.runtime.migration] Running stamp_revision  -> 5f2621c13b39
@@ -602,187 +811,16 @@ airflow-init  | /bin/bash: line 7: --email: command not found
 airflow-init  | /bin/bash: -c: line 8: syntax error near unexpected token `||'
 airflow-init  | /bin/bash: -c: line 8: `|| true '
 airflow-init exited with code 2
-sh-4.2$ docker-compose -f docker-compose.lite.yaml up -d
+2026-02-20T16:20:29Z == Levantando servicios ==
 [+] Running 4/4
  ✔ Container airflow-postgres   Healthy                                                                                                                                                                               0.6s 
- ✔ Container airflow-webserver  Started                                                                                                                                                                               1.8s 
- ✔ Container airflow-scheduler  Started                                                                                                                                                                               1.1s 
- ✔ Container airflow-init       Started                                                                                                                                                                               1.4s 
-sh-4.2$ docker-compose -f docker-compose.lite.yaml ps
-NAME                IMAGE                   COMMAND                  SERVICE             CREATED              STATUS                             PORTS
-airflow-postgres    postgres:16             "docker-entrypoint.s…"   postgres            About a minute ago   Up About a minute (healthy)        5432/tcp
-airflow-scheduler   apache/airflow:2.10.3   "/usr/bin/dumb-init …"   airflow-scheduler   35 seconds ago       Up 33 seconds                      8080/tcp
-airflow-webserver   apache/airflow:2.10.3   "/usr/bin/dumb-init …"   airflow-webserver   35 seconds ago       Up 33 seconds (health: starting)   0.0.0.0:8080->8080/tcp, :::8080->8080/tcp
-sh-4.2$ curl -I http://localhost:8080 || true
-HTTP/1.1 302 FOUND
-Server: gunicorn
-Date: Fri, 20 Feb 2026 05:41:58 GMT
-Connection: close
-Content-Type: text/html; charset=utf-8
-Content-Length: 197
-Location: /home
-Cache-Control: no-store
-X-Robots-Tag: noindex, nofollow
-Set-Cookie: session=6535a1a8-dbef-4f7e-9c28-7efb04a7fc8b.KDIaLEOKqXqzVBlAWDOB-0lQTQU; Expires=Sun, 22 Mar 2026 05:41:58 GMT; HttpOnly; Path=/; SameSite=Lax
-
-sh-4.2$ docker-compose -f docker-compose.lite.yaml logs --tail=120 airflow-webserver
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:46098 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:46702 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:46758 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:47000 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:47050 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:47648 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:47704 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:48113 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:48190 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:48244 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:48321 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:49499 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:49555 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:49932 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:50002 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:50052 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:50107 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:50379 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:50449 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:50499 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:50554 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:50590 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:50660 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:50710 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:50770 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:51046 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:51116 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:51166 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:51226 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:51485 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:51540 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:51787 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:51851 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:51895 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:51958 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:52212 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:52275 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:52463 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:52532 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:53040 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:53111 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:53334 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:53407 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:53961 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:54059 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:54322 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:54398 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:55022 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:55078 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:55310 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:55365 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:56196 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:56248 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:56508 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:56564 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:57087 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:57147 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:57187 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:57237 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:57560 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:57620 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:57660 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:57710 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:59106 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:59162 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:59316 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:59396 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:59452 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:59535 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:59594 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:59677 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:59733 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:59818 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:60639 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:60722 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:60778 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:60863 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:61167 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:61250 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:61306 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:61387 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:61696 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:61752 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:61954 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:61992 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:62660 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:62715 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:63882 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:63946 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:64582 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:64674 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:64940 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:65014 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:65117 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:65199 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:65385 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:65441 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:65874 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:65950 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:66003 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:66087 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:66686 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:66779 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:66918 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:66964 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:67735 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:67791 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:68043 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:68097 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:68532 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/azure/synapse/artifacts/models/_models_py3.py:68588 SyntaxWarning: invalid escape sequence '\d'
-airflow-webserver  | /home/airflow/.local/lib/python3.12/site-packages/snowflake/sqlalchemy/base.py:1068 SAWarning: The GenericFunction 'flatten' is already registered and is going to be overridden.
-airflow-webserver  | [2026-02-20 05:41:47 +0000] [21] [INFO] Listening at: http://0.0.0.0:8080 (21)
-airflow-webserver  | [2026-02-20 05:41:47 +0000] [21] [INFO] Using worker: sync
-airflow-webserver  | [2026-02-20 05:41:47 +0000] [39] [INFO] Booting worker with pid: 39
-airflow-webserver  | [2026-02-20 05:41:47 +0000] [40] [INFO] Booting worker with pid: 40
-airflow-webserver  | [2026-02-20 05:41:47 +0000] [41] [INFO] Booting worker with pid: 41
-airflow-webserver  | [2026-02-20 05:41:47 +0000] [42] [INFO] Booting worker with pid: 42
-airflow-webserver  | 127.0.0.1 - - [20/Feb/2026:05:41:52 +0000] "GET /health HTTP/1.1" 200 283 "-" "curl/7.88.1"
-airflow-webserver  | 172.19.0.1 - - [20/Feb/2026:05:41:58 +0000] "HEAD / HTTP/1.1" 302 0 "-" "curl/8.3.0"
-sh-4.2$ docker-compose -f docker-compose.lite.yaml ps
-NAME                IMAGE                   COMMAND                  SERVICE             CREATED         STATUS                   PORTS
-airflow-postgres    postgres:16             "docker-entrypoint.s…"   postgres            4 minutes ago   Up 4 minutes (healthy)   5432/tcp
-airflow-scheduler   apache/airflow:2.10.3   "/usr/bin/dumb-init …"   airflow-scheduler   3 minutes ago   Up 3 minutes             8080/tcp
-airflow-webserver   apache/airflow:2.10.3   "/usr/bin/dumb-init …"   airflow-webserver   3 minutes ago   Up 3 minutes (healthy)   0.0.0.0:8080->8080/tcp, :::8080->8080/tcp
-sh-4.2$ sudo ss -lntp | grep ':8080' || echo "NO LISTEN 8080"
-LISTEN 0      128          0.0.0.0:8080       0.0.0.0:*    users:(("docker-proxy",pid=6068,fd=4))
-LISTEN 0      128             [::]:8080          [::]:*    users:(("docker-proxy",pid=6075,fd=4))
-sh-4.2$ curl -fsS -o /dev/null -w "HTTP=%{http_code}\n" http://localhost:8080/health || echo "FAIL health"
-HTTP=200
-sh-4.2$ curl -I http://localhost:8080 | head -n 5
-  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
-                                 Dload  Upload   Total   Spent    Left  Speed
-  0   197    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
-HTTP/1.1 302 FOUND
-Server: gunicorn
-Date: Fri, 20 Feb 2026 05:47:34 GMT
-Connection: close
-Content-Type: text/html; charset=utf-8
-sh-4.2$ echo "=== ps ==="
-=== ps ===
-sh-4.2$ docker-compose -f docker-compose.lite.yaml ps
-NAME                IMAGE                   COMMAND                  SERVICE             CREATED         STATUS                   PORTS
-airflow-postgres    postgres:16             "docker-entrypoint.s…"   postgres            7 minutes ago   Up 7 minutes (healthy)   5432/tcp
-airflow-scheduler   apache/airflow:2.10.3   "/usr/bin/dumb-init …"   airflow-scheduler   6 minutes ago   Up 6 minutes             8080/tcp
-airflow-webserver   apache/airflow:2.10.3   "/usr/bin/dumb-init …"   airflow-webserver   6 minutes ago   Up 6 minutes (healthy)   0.0.0.0:8080->8080/tcp, :::8080->8080/tcp
-sh-4.2$ echo
-
-sh-4.2$ echo "=== ports ==="
-=== ports ===
-sh-4.2$ sudo ss -lntp | grep ':8080' || true
-LISTEN 0      128          0.0.0.0:8080       0.0.0.0:*    users:(("docker-proxy",pid=6068,fd=4))
-LISTEN 0      128             [::]:8080          [::]:*    users:(("docker-proxy",pid=6075,fd=4))
-sh-4.2$ echo
-
-sh-4.2$ echo "=== health ==="
-=== health ===
-sh-4.2$ curl -fsS -o /dev/null -w "HTTP=%{http_code}\n" http://localhost:8080/health
-HTTP=200
-sh-4.2$ 
+ ✔ Container airflow-scheduler  Started                                                                                                                                                                               1.7s 
+ ✔ Container airflow-init       Started                                                                                                                                                                               1.8s 
+ ✔ Container airflow-webserver  Started                                                                                                                                                                               1.9s 
+2026-02-20T16:20:31Z == Estado de contenedores ==
+NAME                IMAGE                   COMMAND                  SERVICE             CREATED          STATUS                                     PORTS
+airflow-init        apache/airflow:2.10.3   "/usr/bin/dumb-init …"   airflow-init        34 seconds ago   Up Less than a second                      8080/tcp
+airflow-postgres    postgres:16             "docker-entrypoint.s…"   postgres            35 seconds ago   Up 33 seconds (healthy)                    5432/tcp
+airflow-scheduler   apache/airflow:2.10.3   "/usr/bin/dumb-init …"   airflow-scheduler   2 seconds ago    Up Less than a second                      8080/tcp
+airflow-webserver   apache/airflow:2.10.3   "/usr/bin/dumb-init …"   airflow-webserver   2 seconds ago    Up Less than a second (health: starting)   0.0.0.0:8080->8080/tcp, :::8080->8080/tcp
+2026-02-20T16:20:31Z == Esperando health 200 ==
