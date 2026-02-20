@@ -1,0 +1,131 @@
+airflow-postgres    postgres:16             "docker-entrypoint.s…"   postgres            35 seconds ago   Up 33 seconds (healthy)                    5432/tcp
+airflow-scheduler   apache/airflow:2.10.3   "/usr/bin/dumb-init …"   airflow-scheduler   2 seconds ago    Up Less than a second                      8080/tcp
+airflow-webserver   apache/airflow:2.10.3   "/usr/bin/dumb-init …"   airflow-webserver   2 seconds ago    Up Less than a second (health: starting)   0.0.0.0:8080->8080/tcp, :::8080->8080/tcp
+2026-02-20T16:20:31Z == Esperando health 200 ==
+2026-02-20T16:21:38Z ✅ OK: Airflow responde en puerto 8080
+OK: syntax
+sh-4.2$ exit
+exit
+
+
+Exiting session with sessionId: user4797248=edwin.sierra-p@mail.escuelaing.edu.co-8lig6gs7gogogqttt5cl8o469u.
+
+practice $ #!/bin/bash
+practice $ # ============================================================
+practice $ # Destroy EC2 Infrastructure - AWS Academy
+practice $ # Deletes:
+practice $ #   - EC2 instance (by Name tag)
+practice $ #   - Associated Security Group
+practice $ # Region: us-east-1
+practice $ # ============================================================
+practice $ 
+practice $ set -e
+practice $ 
+practice $ REGION="us-east-1"
+practice $ INSTANCE_NAME="bd-airflow-ec2"
+practice $ SECURITY_GROUP_NAME="bd-airflow-sg"
+practice $ 
+practice $ echo "==> Setting region to ${REGION}"
+==> Setting region to us-east-1
+practice $ aws configure set region ${REGION}
+practice $ 
+practice $ echo "==> Searching for EC2 instance with Name=${INSTANCE_NAME}"
+==> Searching for EC2 instance with Name=bd-airflow-ec2
+practice $ 
+practice $ INSTANCE_ID=$(aws ec2 describe-instances \
+>   --filters "Name=tag:Name,Values=${INSTANCE_NAME}" \
+>             "Name=instance-state-name,Values=running,stopped,pending,stopping" \
+>   --query "Reservations[].Instances[].InstanceId" \
+>   --output text)
+practice $ 
+practice $ if [ -z "$INSTANCE_ID" ]; then
+>   echo "No instance found with Name=${INSTANCE_NAME}"
+> else
+>   echo "Instance found: ${INSTANCE_ID}"
+>   echo "==> Terminating instance..."
+>   aws ec2 terminate-instances --instance-ids ${INSTANCE_ID}
+> 
+>   echo "==> Waiting for instance termination..."
+>   aws ec2 wait instance-terminated --instance-ids ${INSTANCE_ID}
+> 
+>   echo "Instance terminated."
+> fi
+No instance found with Name=bd-airflow-ec2
+practice $ 
+practice $ echo "==> Searching for Security Group ${SECURITY_GROUP_NAME}"
+==> Searching for Security Group bd-airflow-sg
+
+
+
+
+
+~ $ aws ec2 describe-instances \
+>   --filters "Name=tag:Name,Values=${INSTANCE_NAME}" \
+>             "Name=instance-state-name,Values=running,stopped,pending,stopping" \
+>   --query "Reservations[].Instances[].InstanceId" \
+>   --output text
+~ $ cat > destroy_infra_EC2.sh <<'EOF'
+> #!/usr/bin/env bash
+> set -Eeuo pipefail
+> 
+> REGION="us-east-1"
+> INSTANCE_NAME_PREFIX="bd-airflow-ec2"
+> SECURITY_GROUP_NAME="bd-airflow-sg"
+> 
+> echo "==> Region: ${REGION}"
+> export AWS_REGION="$REGION"
+> export AWS_DEFAULT_REGION="$REGION"
+> 
+> echo "==> Searching instances with Name=${INSTANCE_NAME_PREFIX}*"
+> INSTANCE_IDS=$(aws ec2 describe-instances \
+>   --filters "Name=tag:Name,Values=${INSTANCE_NAME_PREFIX}*" \
+>             "Name=instance-state-name,Values=pending,running,stopping,stopped" \
+>   --query "Reservations[].Instances[].InstanceId" \
+>   --output text)
+> 
+> if [[ -z "${INSTANCE_IDS}" || "${INSTANCE_IDS}" == "None" ]]; then
+>   echo "No instances found with Name=${INSTANCE_NAME_PREFIX}*"
+> else
+>   echo "Found instances: ${INSTANCE_IDS}"
+>   echo "==> Terminating..."
+>   aws ec2 terminate-instances --instance-ids ${INSTANCE_IDS} >/dev/null
+> 
+>   echo "==> Waiting for termination..."
+>   aws ec2 wait instance-terminated --instance-ids ${INSTANCE_IDS}
+> 
+>   echo "✅ Instances terminated."
+> fi
+> 
+> echo "==> Searching Security Group ${SECURITY_GROUP_NAME}"
+> VPC_ID=$(aws ec2 describe-vpcs --filters "Name=isDefault,Values=true" --query "Vpcs[0].VpcId" --output text)
+> SG_ID=$(aws ec2 describe-security-groups \
+>   --filters "Name=group-name,Values=${SECURITY_GROUP_NAME}" "Name=vpc-id,Values=${VPC_ID}" \
+>   --query "SecurityGroups[0].GroupId" --output text 2>/dev/null || true)
+> 
+> if [[ -z "${SG_ID}" || "${SG_ID}" == "None" ]]; then
+>   echo "No Security Group found: ${SECURITY_GROUP_NAME}"
+>   exit 0
+> fi
+> 
+> echo "Found SG_ID=${SG_ID}"
+> 
+> # Importante: si SG está en uso por ENIs, fallará. Aquí lo intentamos y si falla, mostramos el motivo.
+> echo "==> Deleting Security Group..."
+> if aws ec2 delete-security-group --group-id "${SG_ID}" 2>/tmp/sg_delete_err.txt; then
+>   echo "✅ Security Group deleted."
+> else
+>   echo "⚠️  No se pudo borrar el SG (probablemente aún en uso). Detalle:"
+>   cat /tmp/sg_delete_err.txt
+>   echo
+>   echo "Sugerencia: valida si hay ENIs usando el SG:"
+>   echo "aws ec2 describe-network-interfaces --filters Name=group-id,Values=${SG_ID} --query 'NetworkInterfaces[].NetworkInterfaceId' --output text"
+> fi
+> EOF
+~ $ 
+~ $ chmod +x destroy_infra_EC2.sh
+~ $ ./destroy_infra_EC2.sh
+==> Region: us-east-1
+==> Searching instances with Name=bd-airflow-ec2*
+Found instances: i-06d2ab7667adec5fa    i-0db9e7330324b1522     i-0bc8cdf4e76dd12df
+==> Terminating...
+==> Waiting for termination...
