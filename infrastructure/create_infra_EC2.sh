@@ -124,3 +124,5 @@ ls -ltr
 chmod +x create_infra_EC2.sh
 ls -l create_infra_EC2.sh
 ./create_infra_EC2.sh
+echo "==> Conectar en la instancia!"
+aws ssm start-session --target "${INSTANCE_ID}"
