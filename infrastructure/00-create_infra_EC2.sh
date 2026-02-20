@@ -1,5 +1,6 @@
 mkdir practice
 cd practice
+
 cat > create_infra_EC2.sh <<'EOF'
 #!/bin/bash
 # ============================================================
