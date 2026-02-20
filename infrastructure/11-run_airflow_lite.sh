@@ -1,5 +1,5 @@
 #archivo para ejecitar
-rm run_airflow_optionA.sh
+rm -f run_airflow_optionA.sh
 cat > run_airflow_optionA.sh <<'EOF'
 #!/usr/bin/env bash
 set -Eeuo pipefail
@@ -38,13 +38,13 @@ fi
 # Detectar compose v2 (docker compose) o v1 (docker-compose)
 if [[ "$NEED_SUDO" -eq 0 ]] && docker compose version >/dev/null 2>&1; then
   DC="docker compose"
-elif [[ "$NEED_SUDO" -eq 1 ]] && sudo docker compose version >/dev/null 2>&1; then
-  DC="sudo docker compose"
+elif [[ "$NEED_SUDO" -eq 1 ]] && sudo -E env "PATH=$PATH" docker compose version >/dev/null 2>&1; then
+  DC="sudo -E env \"PATH=$PATH\" docker compose"
 elif [[ "$NEED_SUDO" -eq 0 ]] && command -v docker-compose >/dev/null 2>&1; then
   DC="docker-compose"
 elif [[ "$NEED_SUDO" -eq 1 ]] && command -v docker-compose >/dev/null 2>&1; then
-  # docker-compose existe pero docker requiere sudo → ejecutar con sudo
-  DC="sudo docker-compose"
+  # docker-compose existe pero docker requiere sudo → ejecutar con sudo (heredando PATH)
+  DC="sudo -E env \"PATH=$PATH\" docker-compose"
 else
   die "No se encontró 'docker compose' (v2) ni 'docker-compose' (v1)."
 fi
@@ -52,7 +52,7 @@ fi
 log "Usando: ${DC}"
 
 log "== Validando compose config =="
-${DC} -f "${COMPOSE_FILE}" config >/dev/null
+eval "${DC} -f \"${COMPOSE_FILE}\" config >/dev/null"
 log "OK: compose válido"
 
 # ===== Permisos Airflow (UID 50000) =====
@@ -65,21 +65,21 @@ sudo chmod -R u+rwX,g+rX,o+rX logs dags plugins
 
 log "== Ejecutando airflow-init =="
 set +e
-${DC} -f "${COMPOSE_FILE}" up airflow-init
+eval "${DC} -f \"${COMPOSE_FILE}\" up airflow-init"
 INIT_RC=$?
 set -e
 
 if [[ "$INIT_RC" -ne 0 ]]; then
   log "ERROR en airflow-init"
-  ${DC} -f "${COMPOSE_FILE}" logs --tail=200 airflow-init || true
+  eval "${DC} -f \"${COMPOSE_FILE}\" logs --tail=200 airflow-init || true"
   exit "$INIT_RC"
 fi
 
 log "== Levantando servicios =="
-${DC} -f "${COMPOSE_FILE}" up -d
+eval "${DC} -f \"${COMPOSE_FILE}\" up -d"
 
 log "== Estado de contenedores =="
-${DC} -f "${COMPOSE_FILE}" ps
+eval "${DC} -f \"${COMPOSE_FILE}\" ps"
 
 log "== Esperando health 200 =="
 for i in $(seq 1 40); do
@@ -92,7 +92,7 @@ for i in $(seq 1 40); do
 done
 
 log "WARN: No respondió 200. Mostrando logs webserver:"
-${DC} -f "${COMPOSE_FILE}" logs --tail=200 airflow-webserver || true
+eval "${DC} -f \"${COMPOSE_FILE}\" logs --tail=200 airflow-webserver || true"
 exit 1
 EOF
 
