@@ -9,10 +9,11 @@ services:
     volumes:
       - postgres-db-volume:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "airflow"]
+      test: ["CMD-SHELL", "pg_isready -U airflow -d airflow"]
       interval: 10s
+      timeout: 5s
       retries: 10
-    restart: always
+    restart: unless-stopped
 
   airflow-init:
     image: apache/airflow:2.10.3
@@ -23,7 +24,8 @@ services:
     environment:
       AIRFLOW__CORE__EXECUTOR: SequentialExecutor
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
-      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__WEBSERVER__SECRET_KEY: "REEMPLAZA_POR_TOKEN_LARGO"
       _AIRFLOW_WWW_USER_USERNAME: airflow
       _AIRFLOW_WWW_USER_PASSWORD: airflow
     volumes:
@@ -42,6 +44,7 @@ services:
         --email admin@example.com
       || true
       "
+    restart: "no"
 
   airflow-webserver:
     image: apache/airflow:2.10.3
@@ -52,7 +55,8 @@ services:
     environment:
       AIRFLOW__CORE__EXECUTOR: SequentialExecutor
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
-      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__WEBSERVER__SECRET_KEY: "REEMPLAZA_POR_TOKEN_LARGO"
     volumes:
       - ./dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
@@ -60,7 +64,12 @@ services:
     ports:
       - "8080:8080"
     command: webserver
-    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
 
   airflow-scheduler:
     image: apache/airflow:2.10.3
@@ -71,13 +80,14 @@ services:
     environment:
       AIRFLOW__CORE__EXECUTOR: SequentialExecutor
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
-      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__WEBSERVER__SECRET_KEY: "REEMPLAZA_POR_TOKEN_LARGO"
     volumes:
       - ./dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
       - ./plugins:/opt/airflow/plugins
     command: scheduler
-    restart: always
+    restart: unless-stopped
 
 volumes:
   postgres-db-volume:
