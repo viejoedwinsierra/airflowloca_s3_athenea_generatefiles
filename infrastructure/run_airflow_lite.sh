@@ -15,7 +15,7 @@ mkdir -p ~/bin ~/airflow-lite
 chmod 700 ~/bin
 
 #ir a directorio
-#cd /home/ssm-user/airflow-docker
+cd /home/ssm-user/airflow-lite
 
 cat > run_airflow_lite.sh <<'EOF'
 #!/bin/bash
