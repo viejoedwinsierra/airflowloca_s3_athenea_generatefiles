@@ -1,3 +1,4 @@
+cat > docker-compose.lite.yaml << EOF
 services:
   postgres:
     image: postgres:16
@@ -94,3 +95,4 @@ services:
 
 volumes:
   postgres-db-volume:
+EOF
