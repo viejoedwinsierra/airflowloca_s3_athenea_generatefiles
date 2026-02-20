@@ -22,6 +22,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
+      AIRFLOW_UID: "50000"
       AIRFLOW__CORE__EXECUTOR: SequentialExecutor
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
@@ -53,6 +54,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
+      AIRFLOW_UID: "50000"
       AIRFLOW__CORE__EXECUTOR: SequentialExecutor
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
@@ -78,6 +80,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
+      AIRFLOW_UID: "50000"
       AIRFLOW__CORE__EXECUTOR: SequentialExecutor
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
