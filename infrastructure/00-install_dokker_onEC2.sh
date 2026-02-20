@@ -15,4 +15,4 @@ mkdir -p ~/bin ~/airflow-lite
 chmod 700 ~/bin
 
 #ir a directorio
-cd /home/ssm-user/airflow-lite
+cd /home/ssm-user/airflow-lite &&
