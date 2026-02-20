@@ -1,3 +1,4 @@
+cat > create_infra_EC2.sh  <<EOF
 #!/bin/bash
 # ============================================================
 # Create EC2 (Amazon Linux 2) for Airflow - AWS Academy
@@ -124,3 +125,5 @@ echo "    InstanceId: ${INSTANCE_ID}"
 echo "    Public IP: ${PUBLIC_IP}"
 echo "    Public DNS: ${PUBLIC_DNS}"
 echo "    Airflow URL (after install): http://${PUBLIC_IP}:8080"
+EOF
+ls -ltr
