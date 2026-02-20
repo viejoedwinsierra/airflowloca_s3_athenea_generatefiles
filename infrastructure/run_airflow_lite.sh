@@ -17,110 +17,83 @@ chmod 700 ~/bin
 #ir a directorio
 cd /home/ssm-user/airflow-lite
 
-cat > run_airflow_lite.sh <<'EOF'
-#!/bin/bash
-set -euo pipefail
+cat > ~/run_airflow_optionA.sh <<'EOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
 
-PROJECT_DIR="${HOME}/airflow-docker"
-COMPOSE_FILE="${PROJECT_DIR}/docker-compose.lite.yaml"
+# ===== CONFIGURACIÓN (Opción A) =====
+PROJECT_DIR="${PROJECT_DIR:-$HOME/airflow-lite}"
+COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.lite.yaml}"
+AIRFLOW_PORT="${AIRFLOW_PORT:-8080}"
 
-cd "${PROJECT_DIR}"
+log(){ printf "%s %s\n" "$(date -u +%FT%TZ)" "$*"; }
+die(){ log "ERROR: $*"; exit 1; }
+trap 'die "Fallo en línea ${BASH_LINENO[0]}: ${BASH_COMMAND}"' ERR
 
-echo "========================================="
-echo "Pre-check: Docker y Docker Compose"
-echo "========================================="
+log "== Directorio del proyecto =="
+log "${PROJECT_DIR}"
 
-# Require docker
-if ! command -v docker >/dev/null 2>&1; then
-  echo "ERROR: docker no está instalado o no está en PATH"
-  echo "En Amazon Linux 2 instala con:"
-  echo "  sudo yum update -y"
-  echo "  sudo amazon-linux-extras install -y docker"
-  echo "  sudo systemctl enable --now docker"
-  exit 1
+cd "${PROJECT_DIR}" 2>/dev/null || die "No existe ${PROJECT_DIR}"
+[[ -f "${COMPOSE_FILE}" ]] || die "No existe ${PROJECT_DIR}/${COMPOSE_FILE}"
+
+log "== Validando Docker =="
+command -v docker >/dev/null 2>&1 || die "Docker no instalado"
+
+if ! systemctl is-active docker >/dev/null 2>&1; then
+  log "Iniciando docker..."
+  sudo systemctl enable --now docker
 fi
 
-# Require docker-compose (binario)
-if ! command -v docker-compose >/dev/null 2>&1; then
-  echo "ERROR: docker-compose no está instalado o no está en PATH"
-  echo "Instala docker-compose v2 binario con:"
-  echo "  sudo curl -L \"https://github.com/docker/compose/releases/download/v2.29.7/docker-compose-linux-x86_64\" -o /usr/local/bin/docker-compose"
-  echo "  sudo chmod +x /usr/local/bin/docker-compose"
-  exit 1
-fi
+log "== Validando docker-compose =="
+command -v docker-compose >/dev/null 2>&1 || die "docker-compose no instalado"
 
-# Decide whether to use sudo for docker-compose based on docker socket access
+# Detectar si requiere sudo
 if docker ps >/dev/null 2>&1; then
   DC="docker-compose"
 else
+  log "Docker requiere sudo en esta sesión"
   DC="sudo docker-compose"
 fi
 
-echo "Using: ${DC}"
-docker --version
-${DC} version
+log "Usando: ${DC}"
 
-if [ ! -f "${COMPOSE_FILE}" ]; then
-  echo "ERROR: No existe ${COMPOSE_FILE}"
-  exit 1
-fi
-
-echo "========================================="
-echo "Validando docker-compose config"
-echo "========================================="
+log "== Validando compose config =="
 ${DC} -f "${COMPOSE_FILE}" config >/dev/null
-echo "OK: compose config"
+log "OK: compose válido"
 
-echo "========================================="
-echo "Creando estructura local (dags/logs/plugins)"
-echo "========================================="
-mkdir -p dags logs plugins logs/dag_processor_manager
-chmod -R 775 dags logs plugins
-
-echo "========================================="
-echo "Inicializando Airflow (airflow-init)"
-echo "========================================="
+log "== Ejecutando airflow-init =="
 set +e
 ${DC} -f "${COMPOSE_FILE}" up airflow-init
 INIT_RC=$?
 set -e
 
-if [ $INIT_RC -ne 0 ]; then
-  echo "ERROR: airflow-init falló. Mostrando logs:"
+if [[ "$INIT_RC" -ne 0 ]]; then
+  log "ERROR en airflow-init"
   ${DC} -f "${COMPOSE_FILE}" logs --tail=200 airflow-init || true
-  exit $INIT_RC
+  exit "$INIT_RC"
 fi
 
-echo "========================================="
-echo "Levantando servicios (up -d)"
-echo "========================================="
+log "== Levantando servicios =="
 ${DC} -f "${COMPOSE_FILE}" up -d
 
-echo "========================================="
-echo "Estado de contenedores"
-echo "========================================="
+log "== Estado de contenedores =="
 ${DC} -f "${COMPOSE_FILE}" ps
 
-echo "========================================="
-echo "Validación local de UI"
-echo "========================================="
-curl -fsSI http://localhost:8080 >/dev/null && echo "OK: Airflow responde en localhost:8080" || echo "WARN: aún no responde, revisa logs"
+log "== Esperando health 200 =="
+for i in $(seq 1 40); do
+  CODE="$(curl -s -o /dev/null -w "%{http_code}" http://localhost:${AIRFLOW_PORT}/health || true)"
+  if [[ "$CODE" == "200" ]]; then
+    log "✅ OK: Airflow responde en puerto ${AIRFLOW_PORT}"
+    exit 0
+  fi
+  sleep 2
+done
 
-echo
-echo "========================================="
-echo "Airflow LITE está corriendo"
-echo "========================================="
-echo "URL: http://<EC2_PUBLIC_IP>:8080"
-echo "Usuario: airflow"
-echo "Password: airflow"
-echo
-echo "Comandos útiles:"
-echo "  ${DC} -f ${COMPOSE_FILE} logs -f --tail=200 airflow-webserver"
-echo "  ${DC} -f ${COMPOSE_FILE} logs -f --tail=200 airflow-scheduler"
-echo "  ${DC} -f ${COMPOSE_FILE} logs -f --tail=200 postgres"
-echo "  ${DC} -f ${COMPOSE_FILE} down"
-echo "  ${DC} -f ${COMPOSE_FILE} down -v  # reset total"
+log "WARN: No respondió 200. Mostrando logs webserver:"
+${DC} -f "${COMPOSE_FILE}" logs --tail=200 airflow-webserver || true
+exit 1
+
 EOF
 
-chmod +x run_airflow_lite.sh
-bash -n run_airflow_lite.sh && echo "OK: syntax"
+chmod +x ~/run_airflow_optionA.sh
+bash -n run_airflow_optionA.sh && echo "OK: syntax"
