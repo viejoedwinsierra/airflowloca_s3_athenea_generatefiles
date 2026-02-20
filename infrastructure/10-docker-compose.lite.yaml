@@ -36,17 +36,8 @@ services:
       - ./logs:/opt/airflow/logs
       - ./plugins:/opt/airflow/plugins
     command: >
-      bash -c "
-      airflow db migrate &&
-      airflow users create
-        --role Admin
-        --username airflow
-        --password airflow
-        --firstname Admin
-        --lastname User
-        --email admin@example.com
-      || true
-      "
+      bash -c "airflow db migrate &&
+      airflow users create --role Admin --username airflow --password airflow --firstname Admin --lastname User --email admin@example.com || true"
     restart: "no"
 
   airflow-webserver:
