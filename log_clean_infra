@@ -129,3 +129,14 @@ practice $ echo "==> Searching for Security Group ${SECURITY_GROUP_NAME}"
 Found instances: i-06d2ab7667adec5fa    i-0db9e7330324b1522     i-0bc8cdf4e76dd12df
 ==> Terminating...
 ==> Waiting for termination...
+
+✅ Instances terminated.
+==> Searching Security Group bd-airflow-sg
+Found SG_ID=sg-07c4293ecdde1d21b
+==> Deleting Security Group...
+{
+    "Return": true,
+    "GroupId": "sg-07c4293ecdde1d21b"
+}
+✅ Security Group deleted.
+~ $ 
