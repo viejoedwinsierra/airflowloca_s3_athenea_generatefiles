@@ -96,3 +96,4 @@ services:
 volumes:
   postgres-db-volume:
 EOF
+
