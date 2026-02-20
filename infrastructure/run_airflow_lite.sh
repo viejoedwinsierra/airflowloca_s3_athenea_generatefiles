@@ -1,3 +1,5 @@
+cd /home/ssm-user
+pwd
 #instalaar doker 
 sudo yum update -y
 sudo amazon-linux-extras install -y docker
@@ -9,8 +11,11 @@ sudo curl -L "https://github.com/docker/compose/releases/download/v2.29.7/docker
 sudo chmod +x /usr/local/bin/docker-compose
 docker-compose version
 
+mkdir -p ~/bin ~/airflow-lite
+chmod 700 ~/bin
+
 #ir a directorio
-cd /home/ssm-user/airflow-docker
+#cd /home/ssm-user/airflow-docker
 
 cat > run_airflow_lite.sh <<'EOF'
 #!/bin/bash
