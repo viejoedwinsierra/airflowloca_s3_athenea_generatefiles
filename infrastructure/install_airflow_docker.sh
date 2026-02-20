@@ -51,7 +51,7 @@ curl -LfO https://airflow.apache.org/docs/apache-airflow/stable/docker-compose.y
 echo "========================================="
 echo "Creating .env file"
 echo "========================================="
-cat > .env <<EOF
+sudo cat > .env <<EOF
 AIRFLOW_IMAGE_NAME=apache/airflow:2.10.3
 AIRFLOW_UID=50000
 AIRFLOW_GID=0
@@ -60,12 +60,12 @@ EOF
 echo "========================================="
 echo "Initializing Airflow (creating database and user)"
 echo "========================================="
-docker compose up airflow-init
+sudo docker compose up airflow-init
 
 echo "========================================="
 echo "Starting Airflow services"
 echo "========================================="
-docker compose up -d
+sudo docker compose up -d
 
 echo "========================================="
 echo "Airflow installation completed"
