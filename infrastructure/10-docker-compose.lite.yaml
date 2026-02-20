@@ -97,5 +97,5 @@ services:
 volumes:
   postgres-db-volume:
 EOF
-pwd && ls -ltr &&
+pwd && ls -ltr
 
