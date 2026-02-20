@@ -1,3 +1,4 @@
+pwd
 cat > docker-compose.lite.yaml << EOF
 services:
   postgres:
