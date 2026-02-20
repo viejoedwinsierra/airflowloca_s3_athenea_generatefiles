@@ -1,4 +1,5 @@
 #archivo para ejecitar
+rm run_airflow_optionA.sh
 cat > run_airflow_optionA.sh <<'EOF'
 #!/usr/bin/env bash
 set -Eeuo pipefail
@@ -26,15 +27,26 @@ if ! systemctl is-active docker >/dev/null 2>&1; then
   sudo systemctl enable --now docker
 fi
 
-log "== Validando docker-compose =="
-command -v docker-compose >/dev/null 2>&1 || die "docker-compose no instalado"
-
-# Detectar si requiere sudo
-if docker ps >/dev/null 2>&1; then
-  DC="docker-compose"
-else
+# ===== Resolver Compose (v2 plugin preferido) =====
+log "== Validando Compose =="
+NEED_SUDO=0
+if ! docker ps >/dev/null 2>&1; then
+  NEED_SUDO=1
   log "Docker requiere sudo en esta sesión"
+fi
+
+# Detectar compose v2 (docker compose) o v1 (docker-compose)
+if [[ "$NEED_SUDO" -eq 0 ]] && docker compose version >/dev/null 2>&1; then
+  DC="docker compose"
+elif [[ "$NEED_SUDO" -eq 1 ]] && sudo docker compose version >/dev/null 2>&1; then
+  DC="sudo docker compose"
+elif [[ "$NEED_SUDO" -eq 0 ]] && command -v docker-compose >/dev/null 2>&1; then
+  DC="docker-compose"
+elif [[ "$NEED_SUDO" -eq 1 ]] && command -v docker-compose >/dev/null 2>&1; then
+  # docker-compose existe pero docker requiere sudo → ejecutar con sudo
   DC="sudo docker-compose"
+else
+  die "No se encontró 'docker compose' (v2) ni 'docker-compose' (v1)."
 fi
 
 log "Usando: ${DC}"
@@ -43,18 +55,13 @@ log "== Validando compose config =="
 ${DC} -f "${COMPOSE_FILE}" config >/dev/null
 log "OK: compose válido"
 
-
-#permisos en edirectorio
-# 1) Verifica permisos actuales (para evidenciar)
+# ===== Permisos Airflow (UID 50000) =====
+log "== Ajustando permisos de logs/dags/plugins =="
 ls -ld logs logs/scheduler 2>/dev/null || true
 
-# 2) Alinea ownership al UID de Airflow (50000) y grupo 0 (root)
 sudo mkdir -p logs dags plugins
 sudo chown -R 50000:0 logs dags plugins
-
-# 3) Permisos mínimos para escritura del owner
 sudo chmod -R u+rwX,g+rX,o+rX logs dags plugins
-
 
 log "== Ejecutando airflow-init =="
 set +e
@@ -87,7 +94,6 @@ done
 log "WARN: No respondió 200. Mostrando logs webserver:"
 ${DC} -f "${COMPOSE_FILE}" logs --tail=200 airflow-webserver || true
 exit 1
-
 EOF
 
 chmod +x run_airflow_optionA.sh
