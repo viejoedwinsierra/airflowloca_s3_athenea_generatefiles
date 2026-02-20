@@ -17,6 +17,7 @@ chmod 700 ~/bin
 #ir a directorio
 cd /home/ssm-user/airflow-lite
 
+#archivo para ejecitar
 cat > ~/run_airflow_optionA.sh <<'EOF'
 #!/usr/bin/env bash
 set -Eeuo pipefail
@@ -60,6 +61,19 @@ log "Usando: ${DC}"
 log "== Validando compose config =="
 ${DC} -f "${COMPOSE_FILE}" config >/dev/null
 log "OK: compose válido"
+
+
+#permisos en edirectorio
+# 1) Verifica permisos actuales (para evidenciar)
+ls -ld logs logs/scheduler 2>/dev/null || true
+
+# 2) Alinea ownership al UID de Airflow (50000) y grupo 0 (root)
+sudo mkdir -p logs dags plugins
+sudo chown -R 50000:0 logs dags plugins
+
+# 3) Permisos mínimos para escritura del owner
+sudo chmod -R u+rwX,g+rX,o+rX logs dags plugins
+
 
 log "== Ejecutando airflow-init =="
 set +e
