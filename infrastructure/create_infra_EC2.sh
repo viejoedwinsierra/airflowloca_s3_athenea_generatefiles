@@ -10,7 +10,7 @@ set -e
 REGION="us-east-1"
 INSTANCE_TYPE="t3.small"
 SECURITY_GROUP_NAME="bd-airflow-sg"
-INSTANCE_NAME="bd-airflow-ec2"
+INSTANCE_NAME="bd-airflow-ec2-$date"
 
 echo "==> Setting region to ${REGION}"
 aws configure set region ${REGION}
